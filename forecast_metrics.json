@@ -1,0 +1,13 @@
+{
+  "approach": "city-wide daily total, Ridge regression, allocated to stations by historical share",
+  "mae": 267.32,
+  "mape_pct": 16.3,
+  "naive_baseline_mae": 293.76,
+  "improvement_over_baseline_pct": 9.0,
+  "coefficient_of_variation_city": 0.193,
+  "coefficient_of_variation_station_abandoned": 0.85,
+  "test_period": "2024-03-19 to 2024-04-08",
+  "xgboost_attempt_mae": 353.66,
+  "xgboost_attempt_improvement_pct": -20.4,
+  "rationale": "Grid-zone and station-level forecasts were tested and abandoned first (too sparse / too noisy respectively). City-wide aggregation gave a forecastable signal (CV 0.19). XGBoost was tried first at city level but lost to the naive 7-day-average baseline by 20.4% \u2014 overfitting on 124 days of training data. Ridge regression on the same features generalizes better, beating the naive baseline by 9.0%."
+}
