@@ -83,9 +83,14 @@ def load_data():
     with open("forecast_metrics.json") as f:
         forecast_metrics = json.load(f)
 
-    return df, hotspots, ml_clusters, heatmap_sample, city_forecast, station_forecast, test_results, forecast_metrics
+    # Junction-level hotspot analysis (Page 3 completion item)
+    junctions = pd.read_parquet("junction_analysis.parquet")
 
-df, hotspots, ml_clusters, df_for_heatmap, city_forecast, station_forecast, forecast_test_results, forecast_metrics = load_data()
+    return (df, hotspots, ml_clusters, heatmap_sample, city_forecast, station_forecast,
+            test_results, forecast_metrics, junctions)
+
+(df, hotspots, ml_clusters, df_for_heatmap, city_forecast, station_forecast,
+ forecast_test_results, forecast_metrics, junctions) = load_data()
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -96,8 +101,9 @@ with st.sidebar:
 
     page = st.radio(
         "Navigate",
-        ["📊 Overview", "🗺️ Hotspot Map", "🏆 Priority Zones",
-         "⏰ Time Analysis", "🚗 Vehicle Breakdown", "🔍 Zone Deep Dive", "📈 Forecasting"],
+        ["📊 Overview", "🗺️ Hotspot Map", "🏆 Priority Zones", "🚦 Junction Analysis",
+         "⏰ Time Analysis", "🚗 Vehicle Breakdown", "🔍 Zone Deep Dive", "📈 Forecasting",
+         "💡 Recommendations", "🧠 How the ML Works"],
         label_visibility="collapsed"
     )
 
@@ -226,9 +232,16 @@ if page == "📊 Overview":
 # ══════════════════════════════════════════════════════════════════════════════
 elif page == "🗺️ Hotspot Map":
     st.markdown('<p class="main-header">🗺️ AI Hotspot Map</p>', unsafe_allow_html=True)
-    st.markdown("**Method 2 — ML-Based Risk Ranking.** DBSCAN clusters violations into real geographic "
-                 "hotspots, then Isolation Forest flags abnormally severe clusters. See the *Priority Zones* "
-                 "page for Method 1, our earlier grid-based heuristic scoring.")
+    st.markdown("""
+    <div style="display: inline-block; background: #064663; color: #5EC4D6; padding: 4px 14px;
+                border-radius: 20px; font-weight: 700; font-size: 0.85rem; margin-bottom: 10px;">
+        METHOD 2 — ML-BASED RISK RANKING &nbsp;·&nbsp; Score range 0–100
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("DBSCAN clusters violations into real geographic hotspots, then Isolation Forest flags "
+                 "abnormally severe clusters. See the *Priority Zones* page for **Method 1** — our earlier "
+                 "grid-based heuristic scoring (score range 0–10). These are two deliberately different, "
+                 "independently built approaches — not the same score on two different scales.")
 
     map_view = st.radio(
         "Map view", ["Bubble Hotspot Map", "Density Heatmap"],
@@ -295,17 +308,21 @@ elif page == "🗺️ Hotspot Map":
         )
         tooltip = None
 
-    view_state = pdk.ViewState(latitude=12.97, longitude=77.59, zoom=11, pitch=0)
+    view_state = pdk.ViewState(latitude=12.97, longitude=77.59, zoom=11.5, pitch=0)
     deck = pdk.Deck(
         layers=[layer], initial_view_state=view_state, tooltip=tooltip,
-        map_style="mapbox://styles/mapbox/dark-v10",
+        # 'road' is one of pydeck's built-in named styles, served via CARTO with no API
+        # token required, and shows street names/area labels more clearly than the prior
+        # mapbox:// style URL (which silently renders near-blank without a Mapbox token —
+        # the root cause of the "too plain/black" map feedback).
+        map_style=pdk.map_styles.ROAD,
     )
     st.pydeck_chart(deck, use_container_width=True, height=600)
 
     if map_view == "Bubble Hotspot Map":
         st.markdown("**Circle size** = number of violations &nbsp;|&nbsp; **Color** = ML Risk priority &nbsp; "
                      "🔴 Critical &nbsp; 🟠 High &nbsp; 🟡 Medium &nbsp; 🟢 Low &nbsp;|&nbsp; "
-                     "**Click any bubble** for full cluster detail")
+                     "**Click any bubble** for full cluster detail &nbsp;|&nbsp; Bengaluru city center")
     else:
         st.markdown("**Glow intensity** = density of recorded violations in that area")
 
@@ -325,9 +342,17 @@ elif page == "🗺️ Hotspot Map":
 # ══════════════════════════════════════════════════════════════════════════════
 elif page == "🏆 Priority Zones":
     st.markdown('<p class="main-header">🏆 Enforcement Priority Zones</p>', unsafe_allow_html=True)
-    st.markdown("**Method 1 — Grid-Based Heuristic Scoring.** Ranked hotspots using a weighted formula "
+    st.markdown("""
+    <div style="display: inline-block; background: #064663; color: #5EC4D6; padding: 4px 14px;
+                border-radius: 20px; font-weight: 700; font-size: 0.85rem; margin-bottom: 10px;">
+        METHOD 1 — HEURISTIC SCORING &nbsp;·&nbsp; Score range 0–10
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("Ranked hotspots using a weighted formula "
                  "(frequency, vehicle severity, violation severity, time concentration, junction proximity). "
-                 "See the *Hotspot Map* page for Method 2, our DBSCAN + Isolation Forest ML-based ranking.")
+                 "See the *Hotspot Map* page for **Method 2** — our DBSCAN + Isolation Forest ML-based ranking "
+                 "(score range 0–100). These are two deliberately different, independently built approaches — "
+                 "not the same score on two different scales.")
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -376,6 +401,60 @@ elif page == "🏆 Priority Zones":
     + 0.20 \times \text{Violation Severity} + 0.10 \times \text{Time Concentration}
     + 0.10 \times \text{Junction Flag}
     """)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE: JUNCTION ANALYSIS
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "🚦 Junction Analysis":
+    st.markdown('<p class="main-header">🚦 Top Junctions by Parking Violations</p>', unsafe_allow_html=True)
+    st.markdown(
+        "168 named junctions identified, covering **50.5%** of all violations. "
+        "The remaining 49.5% occur away from a named junction (mid-block parking) and are excluded here "
+        "since they have no junction context to analyze."
+    )
+    st.caption(
+        "Risk scoring uses the same density-dominant methodology as the DBSCAN cluster ML Risk Score "
+        "(Hotspot Map page), scoped to junction-level aggregation for consistency."
+    )
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Named Junctions", f"{len(junctions)}")
+    col2.metric("🔴 Critical", int((junctions["priority_level"] == "Critical").sum()))
+    col3.metric("🟠 High", int((junctions["priority_level"] == "High").sum()))
+    col4.metric("Top Junction", junctions.iloc[0]["junction_display"])
+
+    st.markdown("---")
+    top_n_junctions = st.slider("Show top N junctions", 10, len(junctions), min(25, len(junctions)))
+
+    junction_display = junctions.nsmallest(top_n_junctions, "rank")[[
+        "rank", "junction_display", "police_station", "violation_count",
+        "top_violation", "top_vehicle", "peak_hour", "junction_risk_score", "priority_level"
+    ]].copy()
+    junction_display["peak_hour"] = junction_display["peak_hour"].apply(lambda h: f"{h:02d}:00–{(h+1):02d}:00")
+    junction_display.columns = ["Rank", "Junction", "Police Station", "Violations",
+                                  "Top Violation", "Top Vehicle", "Peak Hour", "Risk Score", "Priority"]
+
+    def color_junction_priority(val):
+        colors = {"Critical": "color: #e74c3c; font-weight: bold", "High": "color: #f39c12; font-weight: bold",
+                  "Medium": "color: #f1c40f", "Low": "color: #2ecc71"}
+        return colors.get(val, "")
+
+    try:
+        styled_junctions = junction_display.style.map(color_junction_priority, subset=["Priority"])
+    except AttributeError:
+        styled_junctions = junction_display.style.applymap(color_junction_priority, subset=["Priority"])
+    st.dataframe(styled_junctions, use_container_width=True, height=500)
+
+    st.markdown("---")
+    st.markdown('<p class="section-header">Violations by Police Station (for comparison)</p>', unsafe_allow_html=True)
+    ps_counts = df["police_station"].value_counts().head(10).reset_index()
+    ps_counts.columns = ["Police Station", "Violations"]
+    fig = px.bar(ps_counts, x="Police Station", y="Violations", color="Violations",
+                 color_continuous_scale="Reds", template="plotly_dark")
+    fig.update_layout(showlegend=False, margin=dict(l=0, r=0, t=10, b=0),
+                       plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                       xaxis_tickangle=-30, height=350)
+    st.plotly_chart(fig, use_container_width=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: TIME ANALYSIS
@@ -574,6 +653,38 @@ elif page == "📈 Forecasting":
     st.markdown("Predicting near-term violation volume from historical patterns — "
                  "city-wide, with an honest account of what didn't work along the way.")
 
+    # ── Tomorrow's headline prediction cards ─────────────────────────────────
+    tomorrow_date = station_forecast["forecast_date"].min()
+    tomorrow_data = station_forecast[station_forecast["forecast_date"] == tomorrow_date].sort_values(
+        "predicted_violations", ascending=False
+    )
+    top_predicted_station = tomorrow_data.iloc[0]["police_station"]
+    top_predicted_violations = tomorrow_data.iloc[0]["predicted_violations"]
+
+    # Derive risk level and enforcement window from REAL existing data for that station
+    # (not invented) — the station's highest-risk DBSCAN cluster and its historical peak hour.
+    station_top_cluster = ml_clusters[ml_clusters["top_police_station"] == top_predicted_station].nlargest(1, "ml_risk_score")
+    if len(station_top_cluster) > 0:
+        expected_risk = station_top_cluster.iloc[0]["priority_level"].replace(" Priority", "")
+    else:
+        expected_risk = "Unrated"
+    station_peak_hour = df[df["police_station"] == top_predicted_station]["hour"].value_counts().index[0]
+    enforcement_window = f"{station_peak_hour:02d}:00–{(station_peak_hour+2)%24:02d}:00"
+
+    st.markdown('<p class="section-header">Tomorrow\'s Prediction at a Glance</p>', unsafe_allow_html=True)
+    pc1, pc2, pc3, pc4 = st.columns(4)
+    pc1.metric("Predicted Highest-Risk Station", top_predicted_station)
+    pc2.metric("Expected Violations", f"{top_predicted_violations:.0f}")
+    pc3.metric("Expected Risk Level", expected_risk)
+    pc4.metric("Recommended Enforcement Window", enforcement_window)
+    st.caption(
+        f"Station-level violation count is allocated from the city-wide forecast by historical share "
+        f"(see methodology below). Risk level and enforcement window come from this station's highest-priority "
+        f"DBSCAN cluster and its historical peak hour — both directly observed in the data, not forecasted."
+    )
+
+    st.markdown("---")
+
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Model", "Ridge Regression")
     col2.metric("MAE (test)", f"{forecast_metrics['mae']:.0f} /day")
@@ -667,3 +778,125 @@ elif page == "📈 Forecasting":
         f"inflating the claim. The most defensible use of this page is the 7-day directional trend "
         f"(are violations rising or falling city-wide), not a precise day-level number for any single station."
     )
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE: RECOMMENDATIONS
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "💡 Recommendations":
+    st.markdown('<p class="main-header">💡 Top Enforcement Recommendations</p>', unsafe_allow_html=True)
+    st.markdown(
+        "The 5 highest-priority hotspot clusters, with a concrete enforcement action for each — "
+        "derived from real cluster-level data (violation count, dominant violation type, peak hour, "
+        "junction proximity), not invented."
+    )
+
+    top5 = ml_clusters.nsmallest(5, "risk_rank").copy()
+
+    def vehicle_recommendation(top_vehicle, violation_count):
+        if violation_count >= 8000:
+            return "2 officers + 1 tow-away vehicle"
+        elif violation_count >= 3000:
+            return "1 officer + 1 tow-away vehicle"
+        else:
+            return "1 officer on patrol"
+
+    for _, row in top5.iterrows():
+        priority_colors = {
+            "Critical Priority": "#e74c3c", "High Priority": "#f39c12",
+            "Medium Priority": "#f1c40f", "Low Priority": "#2ecc71",
+        }
+        color = priority_colors.get(row["priority_level"], "#888")
+        deploy_action = vehicle_recommendation(row["top_vehicle"], row["violation_count"])
+        window_start = int(row["peak_hour"])
+        window_end = (window_start + 2) % 24
+        junction_text = row["top_junction"] if row["top_junction"] != "No Junction" else "a non-junction zone"
+        reason_parts = [f"{int(row['violation_count']):,} total violations"]
+        if row["time_concentration"] > 0.15:
+            reason_parts.append("strong peak-hour concentration")
+        if row["junction_flag"]:
+            reason_parts.append("junction zone")
+        if row["is_outlier"] == -1:
+            reason_parts.append("flagged as anomalous by Isolation Forest")
+        reason = ", ".join(reason_parts)
+
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, #16213e, #0f3460); border-left: 5px solid {color};
+                    border-radius: 10px; padding: 1.2rem 1.5rem; margin-bottom: 1rem;">
+            <div style="font-size: 1.1rem; font-weight: 700; color: white;">
+                {int(row['risk_rank'])}. {row['top_police_station']} — {junction_text}
+            </div>
+            <div style="color: {color}; font-weight: 600; margin: 0.3rem 0;">
+                Priority: {row['priority_level']} (Risk Score: {row['ml_risk_score']:.1f}/100)
+            </div>
+            <div style="color: #cbd5e1; margin-top: 0.5rem; line-height: 1.5;">
+                🚓 <b>Deploy:</b> {deploy_action}<br/>
+                🕐 <b>Time:</b> {window_start:02d}:00–{window_end:02d}:00<br/>
+                🅿️ <b>Dominant violation:</b> {row['top_violation']} ({row['top_vehicle']})<br/>
+                📋 <b>Reason:</b> {reason}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.caption(
+        "Deployment sizing (officers/tow-away vehicles) is a simple rule of thumb based on violation volume "
+        "thresholds, not a separately trained model — shown transparently here rather than presented as ML output."
+    )
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE: HOW THE ML WORKS
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "🧠 How the ML Works":
+    st.markdown('<p class="main-header">🧠 How the ML Works</p>', unsafe_allow_html=True)
+    st.markdown("A transparent account of every model in this app, including what was tried and rejected.")
+
+    st.markdown("---")
+    st.markdown('<p class="section-header">1. DBSCAN — Hotspot Clustering</p>', unsafe_allow_html=True)
+    st.markdown("""
+    Groups nearby parking violations into real geographic hotspot clusters using latitude and longitude,
+    without needing to predefine the number of clusters. Run on an 80,000-row stratified sample (a full-dataset
+    run on all 298K rows exceeded available memory). Parameters: 100m radius, minimum 30 points per cluster.
+    Result: **305 real clusters**, 21.9% of sampled points classified as noise (isolated, non-clustered violations).
+    """)
+
+    st.markdown('<p class="section-header">2. Isolation Forest — Anomaly Detection</p>', unsafe_allow_html=True)
+    st.markdown("""
+    Detects unusually severe hotspot clusters based on violation count, peak-hour concentration, vehicle
+    diversity, and the mix of violation types (no-parking, wrong-parking, main-road, double-parking counts).
+    Since the dataset contains only violation records (no "normal, non-violating" parking data), this model
+    identifies which *violation* hotspots are abnormally severe relative to other hotspots — not violation
+    versus non-violation.
+    """)
+
+    st.markdown('<p class="section-header">3. ML Risk Score — Combining Both</p>', unsafe_allow_html=True)
+    st.markdown("""
+    Combines log-scaled violation density (55%), the Isolation Forest anomaly score (20%), peak-hour
+    concentration (10%), and violation/vehicle severity (15%) into a single 0–100 score. Density is weighted
+    most heavily deliberately: an earlier equal-weighted version of this score let a low-volume cluster with a
+    sharp anomaly signature outrank the city's largest, already-validated hotspot — corrected by making density
+    the dominant term, which is also what would matter most for real enforcement deployment.
+    """)
+
+    st.markdown('<p class="section-header">4. Forecasting — What Worked and What Didn\'t</p>', unsafe_allow_html=True)
+    st.markdown(f"""
+    Three forecasting granularities were tested honestly, and two were rejected:
+    - **Grid-zone level:** rejected — median hotspot zone had only 40 of 150 possible days with recorded
+      activity, too sparse for a daily time series.
+    - **Police-station level:** rejected — coefficient of variation 0.85 (day-to-day swings nearly as large
+      as the average itself). A model tested here lost to a naive 7-day-average baseline.
+    - **City-wide level:** used — coefficient of variation {forecast_metrics['coefficient_of_variation_city']:.2f},
+      genuinely forecastable. XGBoost was tried first here too and *also* lost to the naive baseline
+      ({forecast_metrics['xgboost_attempt_improvement_pct']:.1f}%), likely overfitting on only 124 training days.
+      A simpler, regularized Ridge regression on the same features won, beating the baseline by
+      {forecast_metrics['improvement_over_baseline_pct']:+.1f}%.
+    """)
+
+    st.markdown("---")
+    st.markdown('<p class="section-header">Dataset Used</p>', unsafe_allow_html=True)
+    st.info("""
+    **Dataset used:** Parking Violation Dataset only (298,277 cleaned records, Bengaluru, Nov 2023–Apr 2024).
+
+    **Dataset 2 (Event/Incident data) — not used in this prototype.** It was evaluated and found to have
+    94% missing `end_datetime` values, making event duration and impact uncomputable. Rather than force a
+    weak integration, the event dataset was excluded entirely, and the project scope was kept to what the
+    available data could support credibly.
+    """)
