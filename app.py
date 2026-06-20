@@ -937,10 +937,5 @@ elif page == "🧠 How the ML Works":
     st.markdown("---")
     st.markdown('<p class="section-header">Dataset Used</p>', unsafe_allow_html=True)
     st.info("""
-    **Dataset used:** Parking Violation Dataset only (298,277 cleaned records, Bengaluru, Nov 2023–Apr 2024).
-
-    **Dataset 2 (Event/Incident data) — not used in this prototype.** It was evaluated and found to have
-    94% missing `end_datetime` values, making event duration and impact uncomputable. Rather than force a
-    weak integration, the event dataset was excluded entirely, and the project scope was kept to what the
-    available data could support credibly.
+    **Dataset used:** Parking Violation Dataset (298,277 cleaned records, Bengaluru, Nov 2023–Apr 2024).
     """)
