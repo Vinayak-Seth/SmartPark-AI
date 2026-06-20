@@ -1,4 +1,4 @@
-# SmartPark Enforcement Intelligence
+# SmartPark AI —  Parking Enforcement Intelligence System
 
 AI-driven parking violation analytics for targeted enforcement — built on 298,277
 real parking violation records from Bengaluru (Nov 2023 – Apr 2024).
