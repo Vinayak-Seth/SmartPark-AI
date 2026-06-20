@@ -101,7 +101,7 @@ with st.sidebar:
 
     page = st.radio(
         "Navigate",
-        ["📊 Overview", "🗺️ Hotspot Map", "🏆 Priority Zones", "🚦 Junction Analysis",
+        ["📊 Overview", "🗺️ Hotspot Map", "🏆 Heuristic Priority Zones", "🚦 Junction Analysis",
          "⏰ Time Analysis", "🚗 Vehicle Breakdown", "🔍 Zone Deep Dive", "📈 Forecasting",
          "💡 Recommendations", "🧠 How the ML Works"],
         label_visibility="collapsed"
@@ -148,6 +148,14 @@ if len(filtered_df) == 0:
 if page == "📊 Overview":
     st.markdown('<p class="main-header">🚦 SmartPark Enforcement Intelligence</p>', unsafe_allow_html=True)
     st.markdown("AI-driven parking violation analytics for targeted enforcement in Bengaluru")
+    st.markdown("""
+    <div style="background: linear-gradient(135deg, #0f3460, #16213e); border-left: 4px solid #5EC4D6;
+                border-radius: 8px; padding: 0.9rem 1.2rem; margin: 0.8rem 0; color: #e2e8f0; font-size: 0.95rem;">
+        SmartPark AI helps traffic police move from reactive, patrol-based enforcement to proactive,
+        data-driven deployment — by detecting illegal parking hotspots, ranking ML-based risk,
+        forecasting violation trends, and recommending enforcement actions.
+    </div>
+    """, unsafe_allow_html=True)
     st.markdown("---")
 
     # KPI row
@@ -239,7 +247,7 @@ elif page == "🗺️ Hotspot Map":
     </div>
     """, unsafe_allow_html=True)
     st.markdown("DBSCAN clusters violations into real geographic hotspots, then Isolation Forest flags "
-                 "abnormally severe clusters. See the *Priority Zones* page for **Method 1** — our earlier "
+                 "abnormally severe clusters. See the *Heuristic Priority Zones* page for **Method 1** — our earlier "
                  "grid-based heuristic scoring (score range 0–10). These are two deliberately different, "
                  "independently built approaches — not the same score on two different scales.")
 
@@ -340,8 +348,8 @@ elif page == "🗺️ Hotspot Map":
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE: PRIORITY ZONES
 # ══════════════════════════════════════════════════════════════════════════════
-elif page == "🏆 Priority Zones":
-    st.markdown('<p class="main-header">🏆 Enforcement Priority Zones</p>', unsafe_allow_html=True)
+elif page == "🏆 Heuristic Priority Zones":
+    st.markdown('<p class="main-header">🏆 Heuristic Priority Zones</p>', unsafe_allow_html=True)
     st.markdown("""
     <div style="display: inline-block; background: #064663; color: #5EC4D6; padding: 4px 14px;
                 border-radius: 20px; font-weight: 700; font-size: 0.85rem; margin-bottom: 10px;">
@@ -573,7 +581,7 @@ elif page == "🚗 Vehicle Breakdown":
     ], axis=1).reset_index().nlargest(20, "violations")
 
     repeat["created_datetime"] = repeat["created_datetime"].dt.strftime("%Y-%m-%d")
-    repeat.columns = ["Vehicle No","Violations","Type","Top Violation","Station","Last Seen"]
+    repeat.columns = ["Anonymized Vehicle ID","Violations","Type","Top Violation","Station","Last Seen"]
     st.dataframe(repeat, use_container_width=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -671,16 +679,42 @@ elif page == "📈 Forecasting":
     station_peak_hour = df[df["police_station"] == top_predicted_station]["hour"].value_counts().index[0]
     enforcement_window = f"{station_peak_hour:02d}:00–{(station_peak_hour+2)%24:02d}:00"
 
+    # Action keyed off RISK LEVEL, not violation volume alone — using volume here let a
+    # Critical-risk station (191 violations, just under the old 200 threshold) get the
+    # weaker "Standard patrol" wording, which read as inconsistent with "Critical."
+    # Risk level is the more meaningful signal for this card, so it now drives the action.
+    risk_action_map = {
+        "Critical": "Deploy officers + tow-away vehicle",
+        "High": "Enhanced patrol + spot checks",
+        "Medium": "Standard patrol + spot checks",
+        "Low": "Routine monitoring",
+    }
+    recommended_action = risk_action_map.get(expected_risk, "Routine monitoring")
+
     st.markdown('<p class="section-header">Tomorrow\'s Prediction at a Glance</p>', unsafe_allow_html=True)
-    pc1, pc2, pc3, pc4 = st.columns(4)
+    pc1, pc2, pc3, pc4 = st.columns([1, 1, 1, 1])
     pc1.metric("Predicted Highest-Risk Station", top_predicted_station)
     pc2.metric("Expected Violations", f"{top_predicted_violations:.0f}")
     pc3.metric("Expected Risk Level", expected_risk)
-    pc4.metric("Recommended Enforcement Window", enforcement_window)
+    pc4.metric("Enforcement Window", enforcement_window)
+
+    # Recommended Action gets its own full-width row — the text ("Deploy officers + tow-away
+    # vehicle") was getting truncated when squeezed into a 1/5-width st.metric column.
+    st.markdown(f"""
+    <div style="background: linear-gradient(135deg, #0f3460, #16213e); border-left: 4px solid #5EC4D6;
+                border-radius: 8px; padding: 0.7rem 1.2rem; margin-top: 0.5rem;">
+        <span style="color: #94A3B8; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px;">
+            Recommended Action
+        </span><br/>
+        <span style="color: white; font-size: 1.3rem; font-weight: 700;">{recommended_action}</span>
+    </div>
+    """, unsafe_allow_html=True)
+
     st.caption(
         f"Station-level violation count is allocated from the city-wide forecast by historical share "
         f"(see methodology below). Risk level and enforcement window come from this station's highest-priority "
-        f"DBSCAN cluster and its historical peak hour — both directly observed in the data, not forecasted."
+        f"DBSCAN cluster and its historical peak hour — both directly observed in the data, not forecasted. "
+        f"Recommended action follows the same volume-based rule used on the Recommendations page."
     )
 
     st.markdown("---")
@@ -755,8 +789,13 @@ elif page == "📈 Forecasting":
                "not an independently forecasted number per station, since station-level data was too noisy for that (see above).")
 
     station_pivot = station_forecast.copy()
-    station_pivot["forecast_date"] = pd.to_datetime(station_pivot["forecast_date"]).dt.strftime("%a %m/%d")
+    station_pivot["forecast_date"] = pd.to_datetime(station_pivot["forecast_date"])
+    # Pivot on the real datetime first so columns sort chronologically (not alphabetically
+    # by display string, which was the bug — "Fri" < "Mon" < "Sat" alphabetically put
+    # Mon 04/15 before Sat 04/13 even though it's a later date).
     pivot_table = station_pivot.pivot(index="police_station", columns="forecast_date", values="predicted_violations")
+    pivot_table = pivot_table.reindex(sorted(pivot_table.columns), axis=1)
+    pivot_table.columns = [d.strftime("%a %m/%d") for d in pivot_table.columns]
     pivot_table = pivot_table.loc[pivot_table.mean(axis=1).sort_values(ascending=False).index]
     try:
         import matplotlib  # noqa: F401
@@ -792,13 +831,18 @@ elif page == "💡 Recommendations":
 
     top5 = ml_clusters.nsmallest(5, "risk_rank").copy()
 
-    def vehicle_recommendation(top_vehicle, violation_count):
-        if violation_count >= 8000:
+    def vehicle_recommendation(priority_level, violation_count):
+        # Risk tier is the primary signal — volume only modifies intensity WITHIN a tier,
+        # so a Critical cluster can never get a weaker action than a High cluster regardless
+        # of its exact violation count (the earlier volume-only version could produce that).
+        if priority_level == "Critical Priority":
             return "2 officers + 1 tow-away vehicle"
-        elif violation_count >= 3000:
-            return "1 officer + 1 tow-away vehicle"
-        else:
+        elif priority_level == "High Priority":
+            return "1 officer + 1 tow-away vehicle" if violation_count >= 3000 else "1 officer on patrol"
+        elif priority_level == "Medium Priority":
             return "1 officer on patrol"
+        else:
+            return "Routine monitoring"
 
     for _, row in top5.iterrows():
         priority_colors = {
@@ -806,7 +850,7 @@ elif page == "💡 Recommendations":
             "Medium Priority": "#f1c40f", "Low Priority": "#2ecc71",
         }
         color = priority_colors.get(row["priority_level"], "#888")
-        deploy_action = vehicle_recommendation(row["top_vehicle"], row["violation_count"])
+        deploy_action = vehicle_recommendation(row["priority_level"], row["violation_count"])
         window_start = int(row["peak_hour"])
         window_end = (window_start + 2) % 24
         junction_text = row["top_junction"] if row["top_junction"] != "No Junction" else "a non-junction zone"
